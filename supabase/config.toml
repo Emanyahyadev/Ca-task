@@ -1,0 +1,7 @@
+project_id = "aofdqhxwmqcwxjnfnxhp"
+
+[functions.send-password-email]
+verify_jwt = false
+
+[functions.create-employee]
+verify_jwt = false
