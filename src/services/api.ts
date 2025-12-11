@@ -7,7 +7,7 @@ export const getClients = async (): Promise<Client[]> => {
     .from('clients')
     .select('*')
     .order('created_at', { ascending: false });
-  
+
   if (error) throw error;
   return (data || []).map(c => ({
     ...c,
@@ -59,7 +59,7 @@ export const getTasks = async (currentUser?: User): Promise<Task[]> => {
 
   const { data, error } = await query;
   if (error) throw error;
-  
+
   return (data || []).map(t => ({
     ...t,
     status: t.status as Task['status'],
@@ -73,7 +73,7 @@ export const getTaskById = async (id: string): Promise<Task | null> => {
     .select('*')
     .eq('id', id)
     .single();
-  
+
   if (error) return null;
   return data ? {
     ...data,
@@ -120,7 +120,7 @@ export const getEmployees = async (): Promise<Employee[]> => {
     .from('employees')
     .select('*')
     .order('created_at', { ascending: false });
-  
+
   if (error) throw error;
   return data || [];
 };
@@ -162,18 +162,18 @@ export const updateEmployee = async (employee: Employee): Promise<void> => {
       active: employee.active
     })
     .eq('id', employee.id);
-  
+
   if (error) throw error;
 };
 
 // --- Documents ---
 export const getDocuments = async (taskId?: string): Promise<Document[]> => {
   let query = supabase.from('documents').select('*');
-  
+
   if (taskId) {
     query = query.eq('task_id', taskId);
   }
-  
+
   const { data, error } = await query.order('uploaded_at', { ascending: false });
   if (error) throw error;
   return data || [];
@@ -183,7 +183,16 @@ export const uploadDocument = async (doc: Omit<Document, 'id' | 'uploaded_at'>):
   const { error } = await supabase
     .from('documents')
     .insert(doc);
-  
+
+  if (error) throw error;
+};
+
+export const deleteDocument = async (id: string): Promise<void> => {
+  const { error } = await supabase
+    .from('documents')
+    .delete()
+    .eq('id', id);
+
   if (error) throw error;
 };
 
@@ -212,7 +221,7 @@ export const getEmployeeByUserId = async (userId: string): Promise<Employee | nu
     .select('*')
     .eq('user_id', userId)
     .single();
-  
+
   if (error) return null;
   return data;
 };
@@ -223,7 +232,7 @@ export const deleteClient = async (id: string): Promise<void> => {
     .from('clients')
     .delete()
     .eq('id', id);
-  
+
   if (error) throw error;
 };
 
@@ -232,7 +241,7 @@ export const deleteEmployee = async (id: string): Promise<void> => {
     .from('employees')
     .delete()
     .eq('id', id);
-  
+
   if (error) throw error;
 };
 
@@ -242,12 +251,12 @@ export const deleteTask = async (id: string): Promise<void> => {
     .from('documents')
     .delete()
     .eq('task_id', id);
-  
+
   const { error } = await supabase
     .from('tasks')
     .delete()
     .eq('id', id);
-  
+
   if (error) throw error;
 };
 
@@ -257,7 +266,7 @@ export const getInvoices = async (): Promise<Invoice[]> => {
     .from('invoices')
     .select('*')
     .order('created_at', { ascending: false });
-  
+
   if (error) throw error;
   return (data || []).map(inv => ({
     ...inv,
@@ -307,18 +316,18 @@ export const deleteInvoice = async (id: string): Promise<void> => {
     .from('invoices')
     .delete()
     .eq('id', id);
-  
+
   if (error) throw error;
 };
 
 // --- Payments ---
 export const getPayments = async (invoiceId?: string): Promise<Payment[]> => {
   let query = supabase.from('payments').select('*');
-  
+
   if (invoiceId) {
     query = query.eq('invoice_id', invoiceId);
   }
-  
+
   const { data, error } = await query.order('payment_date', { ascending: false });
   if (error) throw error;
   return (data || []).map(p => ({
@@ -331,7 +340,7 @@ export const savePayment = async (payment: Omit<Payment, 'id' | 'created_at'>): 
   const { error } = await supabase
     .from('payments')
     .insert(payment);
-  
+
   if (error) throw error;
 };
 
@@ -340,11 +349,11 @@ export const getInvoiceStats = async (): Promise<InvoiceStats> => {
   const { data, error } = await supabase
     .from('invoices')
     .select('amount, status');
-  
+
   if (error) throw error;
-  
+
   const invoices = data || [];
-  
+
   return {
     totalInvoices: invoices.length,
     totalPaid: invoices.filter(i => i.status === 'Paid').reduce((sum, i) => sum + Number(i.amount), 0),

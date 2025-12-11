@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { User, Task, Client, Document } from '@/types';
-import { getTaskById, getClients, saveTask, getDocuments, uploadDocument } from '@/services/api';
+import { getTaskById, getClients, saveTask, getDocuments, uploadDocument, deleteDocument } from '@/services/api';
 import { Card, Button, Badge } from '@/components/ca/ui';
-import { ArrowLeft, Upload, FileText, Download, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Upload, FileText, Download, AlertCircle, Trash2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -70,21 +70,21 @@ const TaskDetail: React.FC<{ user: User }> = ({ user }) => {
 
   const handleStatusChange = async (newStatus: string) => {
     if (!task) return;
-    
+
     // Check if employee is trying to update past due date
     if (isPastDue && isEmployee) {
-      toast({ 
-        title: 'Task Overdue', 
+      toast({
+        title: 'Task Overdue',
         description: 'You cannot update the status of an overdue task. Please contact your manager.',
-        variant: 'destructive' 
+        variant: 'destructive'
       });
       return;
     }
 
     setStatusLoading(true);
     try {
-      const updatedTask = { 
-        ...task, 
+      const updatedTask = {
+        ...task,
         status: newStatus as Task['status'],
         completed_at: newStatus === 'Completed' ? new Date().toISOString() : null
       };
@@ -101,20 +101,101 @@ const TaskDetail: React.FC<{ user: User }> = ({ user }) => {
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0] && task) {
       const file = e.target.files[0];
+
       try {
+        // 1) Upload to Supabase Storage with readable folder structure
+        const sanitize = (str: string) => str.replace(/[^a-z0-9\-_]/gi, '_').replace(/_+/g, '_');
+        // Fallback to task ID if client mapping fails, but aim for Client Name
+        const clientFolder = client ? sanitize(client.name) : `client_${task.client_id}`;
+        const taskFolder = sanitize(task.title);
+
+        // Final Path: ClientName / TaskTitle / FileName
+        const filePath = `${clientFolder}/${taskFolder}/${file.name}`;
+
+        const { data, error: uploadError } = await supabase.storage
+          .from('Ca-task-Documents')
+          .upload(filePath, file, { upsert: true });
+
+        if (uploadError) {
+          throw uploadError;
+        }
+
+        // 2) Get a public URL or signed URL (depending on your bucket settings)
+        const { data: urlData } = supabase.storage
+          .from('Ca-task-Documents')
+          .getPublicUrl(filePath);
+
+        const fileUrl = urlData.publicUrl;
+
+        // 3) Save document row with real URL
         await uploadDocument({
           task_id: task.id,
           client_id: task.client_id,
           uploaded_by_user_id: user.id,
           file_name: file.name,
-          file_url: '#', // In real app, this would be storage URL
+          file_url: fileUrl,
           file_type: 'working'
         });
+
         toast({ title: 'Success', description: 'Document uploaded' });
         loadDocuments(task.id);
       } catch (error: any) {
+        console.error('Upload error:', error);
         toast({ title: 'Error', description: error.message, variant: 'destructive' });
       }
+    }
+  };
+
+  const handleDownload = async (doc: Document) => {
+    try {
+      // Logic to handle private bucket downloads
+      // We attempt to extract the file path from the stored public URL
+      const bucketName = 'Ca-task-Documents';
+
+      // Typical structure: .../storage/v1/object/public/Ca-task-Documents/path/to/file
+      if (doc.file_url.includes(bucketName)) {
+        const path = doc.file_url.split(`${bucketName}/`)[1];
+        if (path) {
+          // 'download' option in Supabase storage sets Content-Disposition: attachment
+          const { data, error } = await supabase.storage
+            .from(bucketName)
+            .createSignedUrl(decodeURIComponent(path), 60, {
+              download: doc.file_name // Force download with original filename
+            });
+
+          if (error) {
+            console.error('Error creating signed URL:', error);
+            window.open(doc.file_url, '_blank');
+            return;
+          }
+
+          // Create invisible link to trigger download
+          const link = document.createElement('a');
+          link.href = data.signedUrl;
+          link.setAttribute('download', doc.file_name);
+          document.body.appendChild(link);
+          link.click();
+          link.remove();
+          return;
+        }
+      }
+
+      // If parsing failed, just try opening the original URL
+      window.open(doc.file_url, '_blank');
+    } catch (error) {
+      console.error('Download handler error:', error);
+      window.open(doc.file_url, '_blank');
+    }
+  };
+
+  const handleDeleteDocument = async (docId: string) => {
+    if (!window.confirm('Are you sure you want to delete this document?')) return;
+    try {
+      await deleteDocument(docId);
+      toast({ title: 'Success', description: 'Document deleted' });
+      if (task) loadDocuments(task.id);
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' });
     }
   };
 
@@ -179,13 +260,12 @@ const TaskDetail: React.FC<{ user: User }> = ({ user }) => {
                     key={s}
                     disabled={statusLoading || !canUpdateStatus}
                     onClick={() => handleStatusChange(s)}
-                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
-                      task.status === s 
-                        ? 'bg-blue-600 text-white border-blue-600' 
-                        : !canUpdateStatus
-                          ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
-                          : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
-                    }`}
+                    className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${task.status === s
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : !canUpdateStatus
+                        ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                        : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+                      }`}
                   >
                     {s}
                   </button>
@@ -206,11 +286,26 @@ const TaskDetail: React.FC<{ user: User }> = ({ user }) => {
                 <p className="text-sm text-gray-400 italic">No files uploaded yet.</p>
               ) : (
                 documents.map(doc => (
-                  <div key={doc.id} className="flex items-center justify-between p-2 bg-gray-50 rounded border text-sm">
+                  <div key={doc.id} className="flex items-center justify-between p-2 bg-gray-50 rounded border text-sm group">
                     <span className="truncate flex-1 pr-2" title={doc.file_name}>{doc.file_name}</span>
-                    <a href={doc.file_url} className="text-blue-600 hover:text-blue-800">
-                      <Download size={16} />
-                    </a>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleDownload(doc)}
+                        className="text-blue-600 hover:text-blue-800 p-1 cursor-pointer"
+                        title="Download"
+                      >
+                        <Download size={16} />
+                      </button>
+                      {isAdminOrManager && (
+                        <button
+                          onClick={() => handleDeleteDocument(doc.id)}
+                          className="text-red-500 hover:text-red-700 p-1"
+                          title="Delete document"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))
               )}
